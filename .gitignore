@@ -1,0 +1,6 @@
+*.pem
+.vscode/
+webtransport-go-chat.exe
+package.json
+/server/uploads
+*.exe
