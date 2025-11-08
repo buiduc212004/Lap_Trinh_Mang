@@ -48,6 +48,9 @@ async function readContinuousMessages(stream) {
             } else if (msg.type === "file") {
                 // Hiển thị thông báo file mới
                 addFileNotification(msg.name, msg.filename, msg.size);
+            } else if (msg.type === "drawing") {
+                // Hiển thị bản vẽ nhận được
+                displayReceivedDrawing(msg.name, msg.data);
             }
         } catch(e) {
             console.error("Failed to parse JSON from continuous stream:", e, "Data received:", value);

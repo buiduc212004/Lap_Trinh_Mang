@@ -76,6 +76,10 @@
                 <i class="fas fa-paperclip"></i>
                 Attach File
               </button>
+              <button type="button" class="button drawing-btn" onclick="openDrawingModal()">
+                <i class="fas fa-paint-brush"></i>
+                Draw
+              </button>
               <button type="button" class="button is-primary" id="file-upload-btn" onclick="handleFileUpload(event)" style="display: none;">
                 <i class="fas fa-upload"></i>
                 Upload
@@ -144,6 +148,84 @@
           </div>
         </div>
       </div>
+      <!-- Drawing Modal -->
+      <div id="drawing-modal" class="modal">
+        <div class="modal-background" onclick="closeDrawingModal()"></div>
+        <div class="modal-content drawing-modal-content">
+          <div class="drawing-header">
+            <h3 class="drawing-title">
+              <i class="fas fa-paint-brush"></i>
+              Draw & Share
+            </h3>
+            <button class="modal-close-btn" onclick="closeDrawingModal()">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          
+          <div class="drawing-tools">
+            <div class="color-palette">
+              <label class="color-option">
+                <input type="radio" name="color" id="color-black" value="#000000" onchange="changeColor('#000000')" checked>
+                <span class="color-swatch" style="background: #000000;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#ff0000" onchange="changeColor('#ff0000')">
+                <span class="color-swatch" style="background: #ff0000;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#00ff00" onchange="changeColor('#00ff00')">
+                <span class="color-swatch" style="background: #00ff00;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#0000ff" onchange="changeColor('#0000ff')">
+                <span class="color-swatch" style="background: #0000ff;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#ffff00" onchange="changeColor('#ffff00')">
+                <span class="color-swatch" style="background: #ffff00;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#ff00ff" onchange="changeColor('#ff00ff')">
+                <span class="color-swatch" style="background: #ff00ff;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#00ffff" onchange="changeColor('#00ffff')">
+                <span class="color-swatch" style="background: #00ffff;"></span>
+              </label>
+              <label class="color-option">
+                <input type="radio" name="color" value="#ffa500" onchange="changeColor('#ffa500')">
+                <span class="color-swatch" style="background: #ffa500;"></span>
+              </label>
+            </div>
+            
+            <div class="tool-actions">
+              <button class="tool-btn" id="color-eraser" onclick="selectEraser()">
+                <i class="fas fa-eraser"></i>
+                Eraser
+              </button>
+              <button class="tool-btn" onclick="clearCanvas()">
+                <i class="fas fa-trash"></i>
+                Clear All
+              </button>
+            </div>
+          </div>
+          
+          <div class="canvas-container">
+            <canvas id="drawing-canvas"></canvas>
+          </div>
+          
+          <div class="drawing-actions">
+            <button class="button is-light" onclick="closeDrawingModal()">
+              <i class="fas fa-times"></i>
+              Cancel
+            </button>
+            <button class="button is-success" onclick="sendDrawing()">
+              <i class="fas fa-paper-plane"></i>
+              Send Drawing
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -161,6 +243,7 @@
     <script src="../client/ui.js"></script>
     <script src="../client/message.js"></script>
     <script src="../client/file.js"></script>
+    <script src="../client/drawing.js"></script>
     <script src="../client/utils.js"></script>
   </body>
 </html>

@@ -43,6 +43,13 @@ func handleFileStream(ctx context.Context, server *MessageServer, client *Client
 		return
 	}
 
+	// Check if this is a drawing operation
+	if strings.ToLower(hdr.Op) == "drawing" {
+		// Handle as drawing instead of file
+		handleDrawingStream(server, client, s)
+		return
+	}
+
 	hdr.Filename = sanitizeFilename(hdr.Filename)
 
 	switch strings.ToLower(hdr.Op) {
