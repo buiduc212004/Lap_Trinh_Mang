@@ -93,30 +93,76 @@ async function sendDrawing() {
     const writer = stream.writable.getWriter();
     const encoder = new TextEncoder();
 
-    // Gửi header
-    const header = JSON.stringify({
+    // FIXED: Gửi header với delimiter rõ ràng
+    const headerObj = {
       op: "drawing",
       size: uint8Array.length,
       format: "png"
-    }) + "\n";
-    await writer.write(encoder.encode(header));
+    };
+    const headerJSON = JSON.stringify(headerObj);
+    
+    // Gửi độ dài header trước (4 bytes)
+    const headerLengthBuffer = new ArrayBuffer(4);
+    const headerLengthView = new DataView(headerLengthBuffer);
+    headerLengthView.setUint32(0, headerJSON.length, false); // big-endian
+    await writer.write(new Uint8Array(headerLengthBuffer));
+    console.log("Header length sent:", headerLengthBuffer, headerLengthView);
+    
+    console.log("Sending header:", headerJSON);
+    // Gửi header JSON
+    await writer.write(encoder.encode(headerJSON));
 
-    // Gửi dữ liệu ảnh
-    await writer.write(uint8Array);
+    // Gửi dữ liệu ảnh theo chunks để tránh block
+    const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+    for (let offset = 0; offset < uint8Array.length; offset += CHUNK_SIZE) {
+      const chunk = uint8Array.slice(offset, offset + CHUNK_SIZE);
+      await writer.write(chunk);
+    }
+    
+    // Đóng writer để báo hiệu đã gửi xong
     await writer.close();
 
-    // Đọc response
+    // Bây giờ mới đọc response
     const reader = stream.readable.getReader();
     const decoder = new TextDecoder();
     let response = '';
     
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      response += decoder.decode(value, { stream: true });
+    // Set timeout để tránh treo
+    const timeout = setTimeout(() => {
+      reader.cancel();
+      throw new Error("Response timeout");
+    }, 10000); // 10 seconds
+    
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) {
+          response += decoder.decode(value, { stream: true });
+          // Nếu đã có JSON line hoàn chỉnh, có thể break sớm
+          if (response.includes('\n')) break;
+        }
+      }
+    } finally {
+      clearTimeout(timeout);
     }
 
-    const result = JSON.parse(response.trim());
+    // Parse response, tìm JSON line đầu tiên
+    response = response.trim();
+    if (!response) {
+      throw new Error("No response from server");
+    }
+    
+    // Nếu có nhiều dòng, lấy dòng đầu tiên
+    const lines = response.split('\n');
+    const jsonLine = lines.find(line => line.trim().startsWith('{'));
+    
+    if (!jsonLine) {
+      console.error("Invalid response:", response);
+      throw new Error("No valid JSON response from server");
+    }
+    
+    const result = JSON.parse(jsonLine);
     
     if (result.status === "ok") {
       showNotification('Drawing sent successfully!', 'success');
@@ -127,7 +173,14 @@ async function sendDrawing() {
 
   } catch (error) {
     console.error("Send drawing error:", error);
-    showNotification(`Failed to send drawing: ${error.message}`, 'error');
+    console.error("Error stack:", error.stack);
+    
+    let errorMsg = error.message;
+    if (errorMsg.includes("invalid character")) {
+      errorMsg = "Server response error. Please try again.";
+    }
+    
+    showNotification(`Failed to send drawing: ${errorMsg}`, 'error');
   }
 }
 
