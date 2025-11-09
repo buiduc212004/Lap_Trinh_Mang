@@ -17,25 +17,21 @@ type drawingHeader struct {
 	Format string `json:"format,omitempty"`
 }
 
-// handleDrawingStreamWithPeek xử lý bản vẽ với dữ liệu đã đọc (peek)
+// handleDrawingStreamWithPeek handles drawing with already-read peek bytes
 func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
 	log.Printf("[%s] Drawing stream started", client.Name)
 
-	// SỬA LỖI: Khâu peekData trở lại đầu stream
-	// Tạo một reader "ảo" cho peekData
+	// SỬA LỖI (EOF): Khâu peekData trở lại đầu stream
+	// Tạo một reader "ảo" cho peekData (bytesReader được định nghĩa trong session_handler.go)
 	peekReader := &bytesReader{data: peekData}
 	// Kết hợp peekReader và stream chính
 	fullStreamReader := io.MultiReader(peekReader, s)
 
 	// Bọc reader đã khâu bằng bufio.Reader
-	// Bây giờ br đọc từ peekData trước, sau đó mới đến 's'
+	// Giờ đây, br đọc từ peekData trước, sau đó mới đến 's'
 	br := bufio.NewReader(fullStreamReader)
 
-	// Đọc header với length-prefix TỪ BUFIO.READER
-	// Chúng ta KHÔNG cần truyền peekData vào đây nữa vì nó đã được khâu vào br
-	// Chúng ta cần một hàm readDrawingHeader mới không lấy peekData
-
-	// --- Bắt đầu thay đổi logic đọc header ---
+	// --- SỬA LỖI (EOF): Thay thế logic đọc header cũ ---
 
 	// 1. Đọc 4 byte độ dài header (Big Endian)
 	headerLenBytes := make([]byte, 4)
@@ -86,11 +82,12 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 	// Buffer ảnh
 	imageData := make([]byte, hdr.Size)
 
-	// SỬA LỖI: Không còn 'remainingData'. Đọc trực tiếp từ 'br'
+	// SỬA LỖI (EOF): Đọc chính xác 'hdr.Size' bytes bằng io.ReadFull
 	totalRead, err := io.ReadFull(br, imageData)
 	if err != nil {
+		// Báo lỗi nếu đọc không đủ
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			log.Printf("[%s] Unexpected EOF at %d/%d bytes", client.Name, totalRead, hdr.Size)
+			log.Printf("[%s] Unexpected EOF at %d/%d bytes", client.Name, int64(totalRead), hdr.Size)
 			writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "unexpected EOF"})
 			return
 		}
@@ -114,16 +111,21 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 	}
 	log.Printf("[%s] Drawing response sent to client", client.Name)
 
-	// Broadcast tới tất cả client khác
-	go func() {
-		msg, _ := json.Marshal(map[string]interface{}{
-			"type": "drawing",
-			"name": client.Name,
-			"data": base64Data,
-		})
-		server.Broadcast(msg)
-		log.Printf("[%s] Drawing broadcasted to all clients", client.Name)
-	}()
+	msg, err := json.Marshal(map[string]interface{}{
+		"type": "drawing",
+		"name": client.Name,
+		"data": base64Data,
+	})
+
+	if err != nil {
+		log.Printf("[%s] ERROR: Failed to marshal broadcast drawing: %v", client.Name, err)
+		return // Không broadcast nếu lỗi
+	}
+
+	// Chạy broadcast trong một goroutine riêng
+	go server.Broadcast(msg)
+
+	log.Printf("[%s] Drawing broadcast has been queued", client.Name)
 }
 
 // writeDrawingJSONResult is specific for drawing responses

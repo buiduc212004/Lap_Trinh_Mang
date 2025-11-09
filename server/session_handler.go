@@ -30,9 +30,10 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 	}
 
 	client := &Client{
-		Name:       name,
-		Session:    session,
-		Ch:         make(chan []byte, 10),
+		Name:    name,
+		Session: session,
+		// SỬA LỖI: Tăng bộ đệm để giảm block khi client chậm
+		Ch:         make(chan []byte, 256),
 		SendStream: sendStream,
 	}
 
