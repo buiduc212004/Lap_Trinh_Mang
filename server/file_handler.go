@@ -26,7 +26,7 @@ type fileStreamHeader struct {
 	ChunkEnd   int64  `json:"chunk_end,omitempty"`
 }
 
-// handleFileStream processes a bidirectional stream for file operations.
+// handleFileStream processes a bidirectional stream for file operations ONLY.
 func handleFileStream(ctx context.Context, server *MessageServer, client *Client, s *webtransport.Stream) {
 	_ = ctx
 	defer func() {
@@ -43,10 +43,13 @@ func handleFileStream(ctx context.Context, server *MessageServer, client *Client
 		return
 	}
 
-	// Check if this is a drawing operation
+	// IMPORTANT: Reject drawing operations - they should use different stream
 	if strings.ToLower(hdr.Op) == "drawing" {
-		// Handle as drawing instead of file
-		handleDrawingStream(server, client, s)
+		log.Printf("[%s] Drawing operation sent to file handler - rejecting", client.Name)
+		writeJSONResult(s, map[string]string{
+			"status": "error", 
+			"error":  "invalid operation: use drawing endpoint for drawings",
+		})
 		return
 	}
 
@@ -60,6 +63,7 @@ func handleFileStream(ctx context.Context, server *MessageServer, client *Client
 	case "download":
 		handleDownload(client, s, hdr)
 	default:
+		log.Printf("[%s] Unknown file operation: %s", client.Name, hdr.Op)
 		writeJSONResult(s, map[string]string{"status": "error", "error": "unknown operation"})
 	}
 }
