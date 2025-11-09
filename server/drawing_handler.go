@@ -17,20 +17,57 @@ type drawingHeader struct {
 	Format string `json:"format,omitempty"`
 }
 
-// handleDrawingStreamWithPeek handles drawing with already-read peek bytes
+// handleDrawingStreamWithPeek xử lý bản vẽ với dữ liệu đã đọc (peek)
 func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
 	log.Printf("[%s] Drawing stream started", client.Name)
 
-	// Bọc stream bằng bufio.Reader để đọc liên tục
-	br := bufio.NewReader(s)
+	// SỬA LỖI: Khâu peekData trở lại đầu stream
+	// Tạo một reader "ảo" cho peekData
+	peekReader := &bytesReader{data: peekData}
+	// Kết hợp peekReader và stream chính
+	fullStreamReader := io.MultiReader(peekReader, s)
 
-	// Đọc header với length-prefix
-	hdr, remainingData, err := readDrawingHeaderWithPeek(br, peekData)
-	if err != nil {
-		log.Printf("[%s] Error reading drawing header: %v", client.Name, err)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": err.Error()})
+	// Bọc reader đã khâu bằng bufio.Reader
+	// Bây giờ br đọc từ peekData trước, sau đó mới đến 's'
+	br := bufio.NewReader(fullStreamReader)
+
+	// Đọc header với length-prefix TỪ BUFIO.READER
+	// Chúng ta KHÔNG cần truyền peekData vào đây nữa vì nó đã được khâu vào br
+	// Chúng ta cần một hàm readDrawingHeader mới không lấy peekData
+
+	// --- Bắt đầu thay đổi logic đọc header ---
+
+	// 1. Đọc 4 byte độ dài header (Big Endian)
+	headerLenBytes := make([]byte, 4)
+	if _, err := io.ReadFull(br, headerLenBytes); err != nil {
+		log.Printf("[%s] Error reading drawing header length: %v", client.Name, err)
+		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "failed to read header length"})
 		return
 	}
+	headerLength := uint32(headerLenBytes[0])<<24 | uint32(headerLenBytes[1])<<16 | uint32(headerLenBytes[2])<<8 | uint32(headerLenBytes[3])
+
+	if headerLength == 0 || headerLength > 16*1024 { // Giới hạn 16KB
+		log.Printf("[%s] Invalid header length: %d bytes", client.Name, headerLength)
+		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid header length"})
+		return
+	}
+
+	// 2. Đọc chính xác header JSON
+	headerJSON := make([]byte, headerLength)
+	if _, err := io.ReadFull(br, headerJSON); err != nil {
+		log.Printf("[%s] Error reading drawing header JSON: %v", client.Name, err)
+		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "failed to read header JSON"})
+		return
+	}
+
+	// 3. Phân tích JSON
+	var hdr drawingHeader
+	if err := json.Unmarshal(headerJSON, &hdr); err != nil {
+		log.Printf("[%s] Invalid drawing header format: %v", client.Name, err)
+		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid drawing header format"})
+		return
+	}
+	// --- Kết thúc thay đổi logic đọc header ---
 
 	// Kiểm tra loại operation
 	if hdr.Op != "drawing" {
@@ -39,7 +76,7 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 	}
 
 	// Kiểm tra size hợp lệ
-	if hdr.Size <= 0 || hdr.Size > 10*1024*1024 {
+	if hdr.Size <= 0 || hdr.Size > 10*1024*1024 { // 10MB limit
 		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid drawing size"})
 		return
 	}
@@ -48,32 +85,17 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 
 	// Buffer ảnh
 	imageData := make([]byte, hdr.Size)
-	totalRead := int64(copy(imageData, remainingData))
-	if totalRead > 0 {
-		log.Printf("[%s] Copied %d remaining bytes from header read", client.Name, totalRead)
-	}
 
-	// Đọc tiếp cho đến khi đủ hdr.Size byte
-	for totalRead < hdr.Size {
-		n, err := br.Read(imageData[totalRead:])
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("[%s] Unexpected EOF at %d/%d bytes", client.Name, totalRead, hdr.Size)
-				writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "unexpected EOF"})
-				return
-			}
-			log.Printf("[%s] Error reading drawing data: %v", client.Name, err)
-			writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "failed to read image data"})
+	// SỬA LỖI: Không còn 'remainingData'. Đọc trực tiếp từ 'br'
+	totalRead, err := io.ReadFull(br, imageData)
+	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			log.Printf("[%s] Unexpected EOF at %d/%d bytes", client.Name, totalRead, hdr.Size)
+			writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "unexpected EOF"})
 			return
 		}
-		totalRead += int64(n)
-		log.Printf("[%s] Read %d bytes (total %d/%d)", client.Name, n, totalRead, hdr.Size)
-	}
-
-	// Kiểm tra cuối cùng
-	if totalRead != hdr.Size {
-		log.Printf("[%s] Size mismatch: expected %d, got %d", client.Name, hdr.Size, totalRead)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "size mismatch"})
+		log.Printf("[%s] Error reading drawing data: %v", client.Name, err)
+		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "failed to read image data"})
 		return
 	}
 

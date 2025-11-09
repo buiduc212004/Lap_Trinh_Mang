@@ -103,7 +103,7 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 				cancel()
 				return
 			}
-			
+
 			// Route to appropriate handler based on first bytes
 			go routeBidirectionalStream(ctx, messageServer, client, stream)
 		}
@@ -115,28 +115,28 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 // routeBidirectionalStream reads the first few bytes to determine stream type
 func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer, client *Client, stream *webtransport.Stream) {
 	defer stream.Close()
-	
+
 	// Peek at the first bytes to determine stream type
 	// For drawing: starts with 4-byte length (binary)
 	// For file: starts with JSON header ending with \n
-	
+
 	peekBuf := make([]byte, 8) // Read first 8 bytes
 	n, err := stream.Read(peekBuf)
 	if err != nil && err != io.EOF {
 		log.Printf("[%s] Error peeking stream: %v", client.Name, err)
 		return
 	}
-	
+
 	if n == 0 {
 		log.Printf("[%s] Empty stream received", client.Name)
 		return
 	}
-	
+
 	// Check if it looks like drawing (4-byte big-endian length at start)
 	// Drawing header length will be small (< 1000 bytes typically)
 	if n >= 4 {
 		headerLen := uint32(peekBuf[0])<<24 | uint32(peekBuf[1])<<16 | uint32(peekBuf[2])<<8 | uint32(peekBuf[3])
-		
+
 		// If header length is reasonable for JSON (20-1000 bytes) and byte 4 might be '{'
 		// then it's likely a drawing with length-prefixed header
 		if headerLen > 10 && headerLen < 1000 && (n < 5 || peekBuf[4] == '{' || peekBuf[4] == ' ') {
@@ -145,14 +145,14 @@ func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer,
 			return
 		}
 	}
-	
+
 	// Check if it starts with JSON (file operations)
 	if peekBuf[0] == '{' {
 		log.Printf("[%s] Routing to file handler (detected JSON)", client.Name)
 		handleFileStreamWithPeek(ctx, messageServer, client, stream, peekBuf[:n])
 		return
 	}
-	
+
 	// Default to file handler for backward compatibility
 	log.Printf("[%s] Routing to file handler (default)", client.Name)
 	handleFileStreamWithPeek(ctx, messageServer, client, stream, peekBuf[:n])
@@ -162,8 +162,7 @@ func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer,
 func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
 	// Create a multi-reader that includes peek data
 	reader := io.MultiReader(&bytesReader{data: peekData}, s)
-	
-	
+
 	// Read header from combined reader
 	hdr, err := readStreamHeaderFromReader(reader)
 	if err != nil {
@@ -176,7 +175,7 @@ func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *
 	if hdr.Op == "drawing" {
 		log.Printf("[%s] Drawing operation sent to file handler - rejecting", client.Name)
 		writeJSONResult(s, map[string]string{
-			"status": "error", 
+			"status": "error",
 			"error":  "invalid operation: use drawing endpoint for drawings",
 		})
 		return
@@ -187,7 +186,7 @@ func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *
 	// Route to appropriate file handler
 	// Create a custom stream wrapper that reads from our reader
 	wrappedReader := &readerStream{s: s, r: reader}
-	
+
 	switch hdr.Op {
 	case "upload":
 		handleUpload(client, s, hdr, wrappedReader)
@@ -199,53 +198,6 @@ func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *
 		log.Printf("[%s] Unknown file operation: %s", client.Name, hdr.Op)
 		writeJSONResult(s, map[string]string{"status": "error", "error": "unknown operation"})
 	}
-}
-
-// readDrawingHeaderWithPeek reads header using peeked data
-func readDrawingHeaderWithPeek(s io.Reader, peekData []byte) (*drawingHeader, []byte, error) {
-	// We need at least 4 bytes for length
-	totalNeeded := 4
-	currentData := make([]byte, len(peekData))
-	copy(currentData, peekData)
-	
-	// Read more if needed
-	for len(currentData) < totalNeeded {
-		tmp := make([]byte, totalNeeded-len(currentData))
-		n, err := s.Read(tmp)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read header length: %w", err)
-		}
-		currentData = append(currentData, tmp[:n]...)
-	}
-	
-	// Parse header length
-	headerLength := uint32(currentData[0])<<24 | uint32(currentData[1])<<16 | uint32(currentData[2])<<8 | uint32(currentData[3])
-	
-	if headerLength == 0 || headerLength > 16*1024 {
-		return nil, nil, fmt.Errorf("invalid header length: %d bytes", headerLength)
-	}
-	
-	// Read complete header
-	totalNeeded = 4 + int(headerLength)
-	for len(currentData) < totalNeeded {
-		tmp := make([]byte, totalNeeded-len(currentData))
-		n, err := s.Read(tmp)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read header JSON: %w", err)
-		}
-		currentData = append(currentData, tmp[:n]...)
-	}
-	
-	// Parse JSON header
-	headerJSON := currentData[4 : 4+headerLength]
-	var hdr drawingHeader
-	if err := json.Unmarshal(headerJSON, &hdr); err != nil {
-		return nil, nil, fmt.Errorf("invalid drawing header format: %w", err)
-	}
-	
-	// Return remaining data after header
-	remaining := currentData[4+headerLength:]
-	return &hdr, remaining, nil
 }
 
 // readStreamHeaderFromReader reads file header from a reader
