@@ -2,7 +2,7 @@
  * Module xử lý kết nối WebTransport
  */
 
-const baseUrl = "https://26.135.88.251:4433/chat";
+const baseUrl = "https://localhost:4433/chat";
 let transport = null;
 let name = "";
 let isConnecting = false;

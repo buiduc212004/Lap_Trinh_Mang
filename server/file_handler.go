@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -24,113 +22,6 @@ type fileStreamHeader struct {
 	ChunkIndex int    `json:"chunk_index,omitempty"`
 	ChunkStart int64  `json:"chunk_start,omitempty"`
 	ChunkEnd   int64  `json:"chunk_end,omitempty"`
-}
-
-// handleFileStream processes a bidirectional stream for file operations ONLY.
-func handleFileStream(ctx context.Context, server *MessageServer, client *Client, s *webtransport.Stream) {
-	_ = ctx
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("⚠️ Panic recovered in handleFileStream for %s: %v", client.Name, r)
-		}
-		s.Close()
-	}()
-
-	hdr, err := readStreamHeader(s)
-	if err != nil {
-		log.Printf("[%s] Error reading stream header: %v", client.Name, err)
-		writeJSONResult(s, map[string]string{"status": "error", "error": err.Error()})
-		return
-	}
-
-	// IMPORTANT: Reject drawing operations - they should use different stream
-	if strings.ToLower(hdr.Op) == "drawing" {
-		log.Printf("[%s] Drawing operation sent to file handler - rejecting", client.Name)
-		writeJSONResult(s, map[string]string{
-			"status": "error", 
-			"error":  "invalid operation: use drawing endpoint for drawings",
-		})
-		return
-	}
-
-	hdr.Filename = sanitizeFilename(hdr.Filename)
-
-	switch strings.ToLower(hdr.Op) {
-	case "upload":
-		handleUpload(client, s, hdr)
-	case "merge":
-		handleMerge(server, client, s, hdr)
-	case "download":
-		handleDownload(client, s, hdr)
-	default:
-		log.Printf("[%s] Unknown file operation: %s", client.Name, hdr.Op)
-		writeJSONResult(s, map[string]string{"status": "error", "error": "unknown operation"})
-	}
-}
-
-// readStreamHeader reads the initial JSON line from the stream.
-func readStreamHeader(s io.Reader) (*fileStreamHeader, error) {
-	headerBuf := make([]byte, 0, 16*1024)
-	tmp := make([]byte, 4096)
-	for {
-		n, err := s.Read(tmp)
-		if n > 0 {
-			headerBuf = append(headerBuf, tmp[:n]...)
-			if i := bytes.IndexByte(headerBuf, '\n'); i >= 0 {
-				headerBuf = headerBuf[:i]
-				break
-			}
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading header failed: %w", err)
-		}
-		if len(headerBuf) > 16*1024 {
-			return nil, fmt.Errorf("header too large")
-		}
-	}
-
-	var hdr fileStreamHeader
-	if err := json.Unmarshal(headerBuf, &hdr); err != nil {
-		return nil, fmt.Errorf("invalid header format: %w", err)
-	}
-	return &hdr, nil
-}
-
-// handleUpload processes a single file chunk upload.
-func handleUpload(client *Client, s *webtransport.Stream, hdr *fileStreamHeader) {
-	tempFile := filepath.Join("uploads", fmt.Sprintf("%s.part%d", hdr.Filename, hdr.ChunkIndex))
-	f, err := os.Create(tempFile)
-	if err != nil {
-		writeJSONResult(s, map[string]string{"status": "error", "error": "cannot create temp file"})
-		return
-	}
-	defer f.Close()
-
-	if hdr.Size > 0 {
-		f.Truncate(hdr.Size) // Pre-allocate file size to reduce fragmentation
-	}
-
-	log.Printf("⬆[%s] Receiving chunk %d for %s (%.2f MB)",
-		client.Name, hdr.ChunkIndex, hdr.Filename, float64(hdr.Size)/(1024*1024))
-
-	bufPtr := bufferPool.Get().(*[]byte)
-	defer bufferPool.Put(bufPtr)
-
-	written, err := io.Copy(f, s)
-	if err != nil {
-		writeJSONResult(s, map[string]string{"status": "error", "error": "failed to write chunk to disk"})
-		return
-	}
-	f.Sync()
-
-	log.Printf("[%s] Finished receiving chunk %d (%s), %.2f MB written.",
-		client.Name, hdr.ChunkIndex, hdr.Filename, float64(written)/(1024*1024))
-
-	writeJSONResult(s, map[string]interface{}{
-		"status":      "ok",
-		"chunk_index": hdr.ChunkIndex,
-		"bytes":       written,
-	})
 }
 
 // handleMerge combines chunks into a final file and verifies it.
@@ -196,6 +87,43 @@ func handleMerge(server *MessageServer, client *Client, s *webtransport.Stream, 
 		})
 		server.Broadcast(msg)
 	}()
+}
+
+// handleUpload handles upload with custom reader
+func handleUpload(client *Client, s *webtransport.Stream, hdr *fileStreamHeader, reader io.Reader) {
+	tempFile := filepath.Join("uploads", fmt.Sprintf("%s.part%d", hdr.Filename, hdr.ChunkIndex))
+	f, err := os.Create(tempFile)
+	if err != nil {
+		writeJSONResult(s, map[string]string{"status": "error", "error": "cannot create temp file"})
+		return
+	}
+	defer f.Close()
+
+	if hdr.Size > 0 {
+		f.Truncate(hdr.Size)
+	}
+
+	log.Printf("⬆[%s] Receiving chunk %d for %s (%.2f MB)",
+		client.Name, hdr.ChunkIndex, hdr.Filename, float64(hdr.Size)/(1024*1024))
+
+	bufPtr := bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(bufPtr)
+
+	written, err := io.Copy(f, reader)
+	if err != nil {
+		writeJSONResult(s, map[string]string{"status": "error", "error": "failed to write chunk to disk"})
+		return
+	}
+	f.Sync()
+
+	log.Printf("[%s] Finished receiving chunk %d (%s), %.2f MB written.",
+		client.Name, hdr.ChunkIndex, hdr.Filename, float64(written)/(1024*1024))
+
+	writeJSONResult(s, map[string]interface{}{
+		"status":      "ok",
+		"chunk_index": hdr.ChunkIndex,
+		"bytes":       written,
+	})
 }
 
 // handleDownload processes a request to download a file chunk.

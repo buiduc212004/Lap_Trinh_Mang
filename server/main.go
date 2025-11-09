@@ -57,7 +57,7 @@ func main() {
 
 	// Start the server (requires certificate and key files)
 	// Make sure 'cert.pem' and 'key.pem' are in the same directory or provide the correct path.
-	err := wt.ListenAndServeTLS("server.pem", "server-key.pem")
+	err := wt.ListenAndServeTLS("localhost.pem", "localhost-key.pem")
 	if err != nil {
 		log.Fatalf("ListenAndServeTLS failed: %v", err)
 	}

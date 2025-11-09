@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
-	"fmt"
+	"encoding/base64"
 	"io"
 	"log"
 
@@ -18,16 +16,12 @@ type drawingHeader struct {
 	Format string `json:"format,omitempty"`
 }
 
-// handleDrawingStream processes a bidirectional stream for drawing operations ONLY.
-// This is completely separate from file operations.
-func handleDrawingStream(server *MessageServer, client *Client, s *webtransport.Stream) {
-	defer func() {
-		s.Close()
-		log.Printf("[%s] Drawing stream closed", client.Name)
-	}()
+// handleDrawingStreamWithPeek handles drawing with already-read peek bytes
+func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
+	log.Printf("[%s] Drawing stream started", client.Name)
 
-	// Read header with fixed-length prefix
-	hdr, err := readDrawingHeaderFixed(s)
+	// Read header with fixed-length prefix (using peek data)
+	hdr, remainingData, err := readDrawingHeaderWithPeek(s, peekData)
 	if err != nil {
 		log.Printf("[%s] Error reading drawing header: %v", client.Name, err)
 		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": err.Error()})
@@ -55,6 +49,13 @@ func handleDrawingStream(server *MessageServer, client *Client, s *webtransport.
 	imageData := make([]byte, hdr.Size)
 	totalRead := int64(0)
 	
+	// First copy remaining data from header read
+	if len(remainingData) > 0 {
+		copy(imageData, remainingData)
+		totalRead = int64(len(remainingData))
+	}
+	
+	// Then read the rest
 	for totalRead < hdr.Size {
 		n, err := s.Read(imageData[totalRead:])
 		if err != nil {
@@ -107,34 +108,6 @@ func handleDrawingStream(server *MessageServer, client *Client, s *webtransport.
 	}()
 }
 
-// readDrawingHeaderFixed reads header with fixed-length prefix (4 bytes for header length)
-func readDrawingHeaderFixed(s io.Reader) (*drawingHeader, error) {
-	// Read 4 bytes for header length
-	headerLengthBuf := make([]byte, 4)
-	if _, err := io.ReadFull(s, headerLengthBuf); err != nil {
-		return nil, fmt.Errorf("failed to read header length: %w", err)
-	}
-	
-	headerLength := binary.BigEndian.Uint32(headerLengthBuf)
-	
-	// Sanity check
-	if headerLength == 0 || headerLength > 16*1024 { // Max 16KB for header
-		return nil, fmt.Errorf("invalid header length: %d bytes", headerLength)
-	}
-	
-	// Read exact header JSON
-	headerBuf := make([]byte, headerLength)
-	if _, err := io.ReadFull(s, headerBuf); err != nil {
-		return nil, fmt.Errorf("failed to read header JSON: %w", err)
-	}
-	
-	var hdr drawingHeader
-	if err := json.Unmarshal(headerBuf, &hdr); err != nil {
-		return nil, fmt.Errorf("invalid drawing header format: %w", err)
-	}
-	
-	return &hdr, nil
-}
 
 // writeDrawingJSONResult is specific for drawing responses
 func writeDrawingJSONResult(w io.Writer, v interface{}) {

@@ -3,14 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -161,102 +158,11 @@ func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer,
 	handleFileStreamWithPeek(ctx, messageServer, client, stream, peekBuf[:n])
 }
 
-// handleDrawingStreamWithPeek handles drawing with already-read peek bytes
-func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
-	log.Printf("[%s] Drawing stream started", client.Name)
-
-	// Read header with fixed-length prefix (using peek data)
-	hdr, remainingData, err := readDrawingHeaderWithPeek(s, peekData)
-	if err != nil {
-		log.Printf("[%s] Error reading drawing header: %v", client.Name, err)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": err.Error()})
-		return
-	}
-
-	// Validate operation type
-	if hdr.Op != "drawing" {
-		log.Printf("[%s] Invalid drawing operation: %s", client.Name, hdr.Op)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid operation: expected 'drawing'"})
-		return
-	}
-
-	// Validate size
-	if hdr.Size <= 0 || hdr.Size > 10*1024*1024 { // Max 10MB
-		log.Printf("[%s] Invalid drawing size: %d", client.Name, hdr.Size)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid drawing size"})
-		return
-	}
-
-	log.Printf("[%s] Receiving drawing (%s, %.2f KB)", 
-		client.Name, hdr.Format, float64(hdr.Size)/1024)
-
-	// Read image data
-	imageData := make([]byte, hdr.Size)
-	totalRead := int64(0)
-	
-	// First copy remaining data from header read
-	if len(remainingData) > 0 {
-		copy(imageData, remainingData)
-		totalRead = int64(len(remainingData))
-	}
-	
-	// Then read the rest
-	for totalRead < hdr.Size {
-		n, err := s.Read(imageData[totalRead:])
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("[%s] Error reading drawing data: %v", client.Name, err)
-			writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "failed to read image data"})
-			return
-		}
-		totalRead += int64(n)
-	}
-
-	if totalRead != hdr.Size {
-		log.Printf("[%s] Size mismatch: expected %d, got %d", client.Name, hdr.Size, totalRead)
-		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "size mismatch"})
-		return
-	}
-
-	log.Printf("[%s] Drawing received successfully (%.2f KB)", 
-		client.Name, float64(totalRead)/1024)
-
-	// Encode to base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
-
-	// Send success response immediately
-	responseData := map[string]interface{}{
-		"status": "ok",
-		"size":   totalRead,
-	}
-	respBytes, _ := json.Marshal(responseData)
-	respBytes = append(respBytes, '\n')
-	
-	if _, err := s.Write(respBytes); err != nil {
-		log.Printf("[%s] Failed to send drawing response: %v", client.Name, err)
-		return
-	}
-
-	log.Printf("[%s] Drawing response sent to client", client.Name)
-
-	// Broadcast drawing to all clients
-	go func() {
-		msg, _ := json.Marshal(map[string]interface{}{
-			"type": "drawing",
-			"name": client.Name,
-			"data": base64Data,
-		})
-		server.Broadcast(msg)
-		log.Printf("[%s] Drawing broadcasted to all clients", client.Name)
-	}()
-}
-
 // handleFileStreamWithPeek handles file operations with already-read peek bytes
-func handleFileStreamWithPeek(ctx context.Context, server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
+func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
 	// Create a multi-reader that includes peek data
 	reader := io.MultiReader(&bytesReader{data: peekData}, s)
+	
 	
 	// Read header from combined reader
 	hdr, err := readStreamHeaderFromReader(reader)
@@ -284,7 +190,7 @@ func handleFileStreamWithPeek(ctx context.Context, server *MessageServer, client
 	
 	switch hdr.Op {
 	case "upload":
-		handleUploadFromReader(client, s, hdr, wrappedReader)
+		handleUpload(client, s, hdr, wrappedReader)
 	case "merge":
 		handleMerge(server, client, s, hdr)
 	case "download":
@@ -368,43 +274,6 @@ func readStreamHeaderFromReader(r io.Reader) (*fileStreamHeader, error) {
 		return nil, fmt.Errorf("invalid header format: %w", err)
 	}
 	return &hdr, nil
-}
-
-// handleUploadFromReader handles upload with custom reader
-func handleUploadFromReader(client *Client, s *webtransport.Stream, hdr *fileStreamHeader, reader io.Reader) {
-	tempFile := filepath.Join("uploads", fmt.Sprintf("%s.part%d", hdr.Filename, hdr.ChunkIndex))
-	f, err := os.Create(tempFile)
-	if err != nil {
-		writeJSONResult(s, map[string]string{"status": "error", "error": "cannot create temp file"})
-		return
-	}
-	defer f.Close()
-
-	if hdr.Size > 0 {
-		f.Truncate(hdr.Size)
-	}
-
-	log.Printf("⬆[%s] Receiving chunk %d for %s (%.2f MB)",
-		client.Name, hdr.ChunkIndex, hdr.Filename, float64(hdr.Size)/(1024*1024))
-
-	bufPtr := bufferPool.Get().(*[]byte)
-	defer bufferPool.Put(bufPtr)
-
-	written, err := io.Copy(f, reader)
-	if err != nil {
-		writeJSONResult(s, map[string]string{"status": "error", "error": "failed to write chunk to disk"})
-		return
-	}
-	f.Sync()
-
-	log.Printf("[%s] Finished receiving chunk %d (%s), %.2f MB written.",
-		client.Name, hdr.ChunkIndex, hdr.Filename, float64(written)/(1024*1024))
-
-	writeJSONResult(s, map[string]interface{}{
-		"status":      "ok",
-		"chunk_index": hdr.ChunkIndex,
-		"bytes":       written,
-	})
 }
 
 // readerStream wraps a reader to use as stream
