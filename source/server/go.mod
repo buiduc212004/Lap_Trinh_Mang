@@ -1,4 +1,4 @@
-module github.com/buiduc212004/Lap_Trinh_Mang
+module github.com/jnp2018/mid-project-218278758/tree/main/source
 
 go 1.24
 

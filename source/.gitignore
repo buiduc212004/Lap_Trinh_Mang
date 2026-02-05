@@ -1,0 +1,5 @@
+*.pem
+.vscode/
+package.json
+*.exe
+**/uploads/

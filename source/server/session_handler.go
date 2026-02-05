@@ -30,9 +30,8 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 	}
 
 	client := &Client{
-		Name:    name,
-		Session: session,
-		// SỬA LỖI: Tăng bộ đệm để giảm block khi client chậm
+		Name:       name,
+		Session:    session,
 		Ch:         make(chan []byte, 256),
 		SendStream: sendStream,
 	}
@@ -78,7 +77,7 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 		}
 	}()
 
-	// Goroutine for accepting chat messages from client (unidirectional)
+	// Goroutine for accepting chat messages from client
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -117,10 +116,6 @@ func handleWebTransportSession(messageServer *MessageServer, sessionID int, sess
 func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer, client *Client, stream *webtransport.Stream) {
 	defer stream.Close()
 
-	// Peek at the first bytes to determine stream type
-	// For drawing: starts with 4-byte length (binary)
-	// For file: starts with JSON header ending with \n
-
 	peekBuf := make([]byte, 8) // Read first 8 bytes
 	n, err := stream.Read(peekBuf)
 	if err != nil && err != io.EOF {
@@ -133,13 +128,9 @@ func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer,
 		return
 	}
 
-	// Check if it looks like drawing (4-byte big-endian length at start)
-	// Drawing header length will be small (< 1000 bytes typically)
 	if n >= 4 {
 		headerLen := uint32(peekBuf[0])<<24 | uint32(peekBuf[1])<<16 | uint32(peekBuf[2])<<8 | uint32(peekBuf[3])
 
-		// If header length is reasonable for JSON (20-1000 bytes) and byte 4 might be '{'
-		// then it's likely a drawing with length-prefixed header
 		if headerLen > 10 && headerLen < 1000 && (n < 5 || peekBuf[4] == '{' || peekBuf[4] == ' ') {
 			log.Printf("[%s] Routing to drawing handler (detected length-prefix: %d)", client.Name, headerLen)
 			handleDrawingStreamWithPeek(messageServer, client, stream, peekBuf[:n])
@@ -147,7 +138,7 @@ func routeBidirectionalStream(ctx context.Context, messageServer *MessageServer,
 		}
 	}
 
-	// Check if it starts with JSON (file operations)
+	// Check if it starts with JSON
 	if peekBuf[0] == '{' {
 		log.Printf("[%s] Routing to file handler (detected JSON)", client.Name)
 		handleFileStreamWithPeek(ctx, messageServer, client, stream, peekBuf[:n])
@@ -184,8 +175,6 @@ func handleFileStreamWithPeek(_ context.Context, server *MessageServer, client *
 
 	hdr.Filename = sanitizeFilename(hdr.Filename)
 
-	// Route to appropriate file handler
-	// Create a custom stream wrapper that reads from our reader
 	wrappedReader := &readerStream{s: s, r: reader}
 
 	switch hdr.Op {

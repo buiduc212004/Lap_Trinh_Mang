@@ -15,7 +15,6 @@ func main() {
 	// Use all available CPU cores
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	// Ensure the 'uploads' directory exists
 	if err := os.MkdirAll("uploads", 0o755); err != nil {
 		log.Fatalf("Failed to create 'uploads' directory: %v", err)
 	}
@@ -29,7 +28,6 @@ func main() {
 			Addr: ":4433",
 		},
 		CheckOrigin: func(r *http.Request) bool {
-			// Allow all origins for simplicity
 			return true
 		},
 	}
@@ -56,8 +54,7 @@ func main() {
 	log.Printf("Chunk size: %d MB", CHUNK_SIZE/(1024*1024))
 
 	// Start the server (requires certificate and key files)
-	// Make sure 'cert.pem' and 'key.pem' are in the same directory or provide the correct path.
-	err := wt.ListenAndServeTLS("localhost.pem", "localhost-key.pem")
+	err := wt.ListenAndServeTLS("26.135.88.251.pem", "26.135.88.251-key.pem")
 	if err != nil {
 		log.Fatalf("ListenAndServeTLS failed: %v", err)
 	}

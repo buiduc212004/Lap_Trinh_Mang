@@ -7,7 +7,7 @@ let lastX = 0;
 let lastY = 0;
 let currentColor = '#000000';
 let lineWidth = 3;
-let drawingData = []; // Lưu tất cả các nét vẽ
+let drawingData = [];
 
 /**
  * Mở modal vẽ
@@ -54,7 +54,7 @@ function clearCanvas() {
  */
 function changeColor(color) {
   currentColor = color;
-  lineWidth = 3; // Vẽ bình thường
+  lineWidth = 3;
 }
 
 /**
@@ -62,7 +62,7 @@ function changeColor(color) {
  */
 function selectEraser() {
   currentColor = '#ffffff';
-  lineWidth = 20; // Tẩy với nét rộng hơn
+  lineWidth = 20;
   document.getElementById('color-eraser').checked = true;
 }
 
@@ -93,7 +93,7 @@ async function sendDrawing() {
     const writer = stream.writable.getWriter();
     const encoder = new TextEncoder();
 
-    // FIXED: Gửi header với delimiter rõ ràng
+    // Gửi header với delimiter rõ ràng
     const headerObj = {
       op: "drawing",
       size: uint8Array.length,
@@ -104,7 +104,7 @@ async function sendDrawing() {
     // Gửi độ dài header trước (4 bytes)
     const headerLengthBuffer = new ArrayBuffer(4);
     const headerLengthView = new DataView(headerLengthBuffer);
-    headerLengthView.setUint32(0, headerJSON.length, false); // big-endian
+    headerLengthView.setUint32(0, headerJSON.length, false);
     await writer.write(new Uint8Array(headerLengthBuffer));
     console.log("Header length sent:", headerLengthBuffer, headerLengthView);
     
@@ -113,7 +113,7 @@ async function sendDrawing() {
     await writer.write(encoder.encode(headerJSON));
 
     // Gửi dữ liệu ảnh theo chunks để tránh block
-    const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+    const CHUNK_SIZE = 64 * 1024;
     for (let offset = 0; offset < uint8Array.length; offset += CHUNK_SIZE) {
       const chunk = uint8Array.slice(offset, offset + CHUNK_SIZE);
       await writer.write(chunk);
@@ -122,7 +122,6 @@ async function sendDrawing() {
     // Đóng writer để báo hiệu đã gửi xong
     await writer.close();
 
-    // Bây giờ mới đọc response
     const reader = stream.readable.getReader();
     const decoder = new TextDecoder();
     let response = '';
@@ -131,7 +130,7 @@ async function sendDrawing() {
     const timeout = setTimeout(() => {
       reader.cancel();
       throw new Error("Response timeout");
-    }, 10000); // 10 seconds
+    }, 10000);
     
     try {
       while (true) {
@@ -139,7 +138,6 @@ async function sendDrawing() {
         if (done) break;
         if (value && value.length > 0) {
           response += decoder.decode(value, { stream: true });
-          // Nếu đã có JSON line hoàn chỉnh, có thể break sớm
           if (response.includes('\n')) break;
         }
       }
@@ -147,13 +145,11 @@ async function sendDrawing() {
       clearTimeout(timeout);
     }
 
-    // Parse response, tìm JSON line đầu tiên
     response = response.trim();
     if (!response) {
       throw new Error("No response from server");
     }
     
-    // Nếu có nhiều dòng, lấy dòng đầu tiên
     const lines = response.split('\n');
     const jsonLine = lines.find(line => line.trim().startsWith('{'));
     

@@ -21,17 +21,10 @@ type drawingHeader struct {
 func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtransport.Stream, peekData []byte) {
 	log.Printf("[%s] Drawing stream started", client.Name)
 
-	// SỬA LỖI (EOF): Khâu peekData trở lại đầu stream
-	// Tạo một reader "ảo" cho peekData (bytesReader được định nghĩa trong session_handler.go)
 	peekReader := &bytesReader{data: peekData}
-	// Kết hợp peekReader và stream chính
 	fullStreamReader := io.MultiReader(peekReader, s)
 
-	// Bọc reader đã khâu bằng bufio.Reader
-	// Giờ đây, br đọc từ peekData trước, sau đó mới đến 's'
 	br := bufio.NewReader(fullStreamReader)
-
-	// --- SỬA LỖI (EOF): Thay thế logic đọc header cũ ---
 
 	// 1. Đọc 4 byte độ dài header (Big Endian)
 	headerLenBytes := make([]byte, 4)
@@ -63,7 +56,6 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 		writeDrawingJSONResult(s, map[string]string{"status": "error", "error": "invalid drawing header format"})
 		return
 	}
-	// --- Kết thúc thay đổi logic đọc header ---
 
 	// Kiểm tra loại operation
 	if hdr.Op != "drawing" {
@@ -82,7 +74,6 @@ func handleDrawingStreamWithPeek(server *MessageServer, client *Client, s *webtr
 	// Buffer ảnh
 	imageData := make([]byte, hdr.Size)
 
-	// SỬA LỖI (EOF): Đọc chính xác 'hdr.Size' bytes bằng io.ReadFull
 	totalRead, err := io.ReadFull(br, imageData)
 	if err != nil {
 		// Báo lỗi nếu đọc không đủ

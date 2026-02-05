@@ -4,7 +4,7 @@
 
 let availableFiles = [];
 const NUM_STREAMS = 8; // Số stream song song
-const CHUNK_SIZE = 512 * 1024; // 256KB cho mỗi lần gửi (client-side chunking)
+const CHUNK_SIZE = 256 * 1024; // 256KB cho mỗi lần gửi (client-side chunking)
 
 /**
  * Tính toán SHA-256 Hash của file
@@ -408,7 +408,7 @@ async function readJSONResponse(readable) {
 }
 
 /**
- * UI Functions (giữ nguyên)
+ * UI Functions
  */
 
 function updateAvailableFiles(files) {

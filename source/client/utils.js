@@ -4,8 +4,8 @@
 
 /**
  * Cập nhật trạng thái kết nối
- * @param {string} status - Trạng thái (connecting, connected, disconnected)
- * @param {string} text - Văn bản hiển thị
+ * @param {string} status
+ * @param {string} text
  */
 function updateConnectionStatus(status, text) {
   const statusElement = document.getElementById("connection-status");
@@ -17,8 +17,8 @@ function updateConnectionStatus(status, text) {
 
 /**
  * Hiển thị thông báo trên giao diện
- * @param {string} message - Nội dung thông báo
- * @param {string} type - Loại thông báo (info, error, success)
+ * @param {string} message
+ * @param {string} type
  */
 function showNotification(message, type = 'info') {
   const existingNotifications = document.querySelectorAll('.notification');
@@ -78,7 +78,7 @@ function handleTyping() {
 
 /**
  * Xử lý phím Enter để gửi tin nhắn
- * @param {Event} event - Sự kiện bàn phím
+ * @param {Event} event
  */
 function handleKeyPress(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -91,7 +91,7 @@ function handleKeyPress(event) {
 
 /**
  * Xử lý phím Enter để tham gia chat
- * @param {Event} event - Sự kiện bàn phím
+ * @param {Event} event
  */
 function handleNameKeyPress(event) {
   if (event.key === 'Enter') {

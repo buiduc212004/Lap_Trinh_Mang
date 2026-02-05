@@ -49,7 +49,6 @@ async function readContinuousMessages(stream) {
                 // Hiển thị thông báo file mới
                 addFileNotification(msg.name, msg.filename, msg.size);
             } else if (msg.type === "drawing") {
-                // Hiển thị bản vẽ nhận được
                 displayReceivedDrawing(msg.name, msg.data);
             }
         } catch(e) {
